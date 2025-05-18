@@ -17,7 +17,7 @@ st.write("Sube la imagen del anaquel a analizar")
 st.write("El modelo analizará la imagen y te mostrará los resultados de la detección de anomalías.")
 st.write("Recuerda que el modelo puede tardar un poco en procesar la imagen, por favor ten paciencia.")
 
-st.write("A continuación puedes ver ejemplos de imagenes que puedes subir para analizar:\n")
+st.write("A continuación puedes ver ejemplos de imágenes que puedes subir para analizar:\n")
 col1, col2 = st.columns(2)
 with col1:
     st.image(Image.open("assets\\IMG_2716.jpg").rotate(270, expand=True), use_container_width=True)
