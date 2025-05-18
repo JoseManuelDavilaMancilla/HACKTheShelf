@@ -103,9 +103,9 @@ st.divider()
 # --- Optional Metrics Section ---
 st.markdown("### 📊 Métricas clave")
 c1, c2, c3 = st.columns(3)
-c1.metric("Imágenes analizadas", "1,200", "+12%")
-c2.metric("Errores detectados", "415", "+5%")
-c3.metric("Productos faltantes", "92", "-3%")
+c1.metric("Imágenes analizadas", "", "0%")
+c2.metric("Errores detectados", "", "0%")
+c3.metric("Productos faltantes", "", "0%")
 style_metric_cards()
 
 add_vertical_space(2)
