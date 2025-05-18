@@ -59,8 +59,8 @@ Backend API (Node.js + MongoDB)
 ## 🚀 Instalación
 
 ```bash
-git clone https://github.com/tu_usuario/smart-planogram-helper.git
-cd smart-planogram-helper
+git clone 
+
 ```
 
 ### Backend
