@@ -408,6 +408,138 @@ def toda_la_info(image_path):
         x += 1
 
     return [data, rectangulo_grande, posicion_por_rect, espacios_vacios, dict_vacios]
+
+def vacios_chequeo2(data):
+  espacios_vacios_2 = []
+  for idx, i in enumerate(data["images"]):
+    img_array = np.array(i)
+    reference_color = np.array([30, 30, 30])  # Approximate dark gray
+
+    # Set a tolerance for how close a color needs to be
+    tolerance = 30
+
+    # Calculate the distance of each pixel to the reference color
+    distance = np.linalg.norm(img_array - reference_color, axis=2)
+
+    # Determine how many pixels are within the tolerance
+    similar_pixels = np.sum(distance < tolerance)
+    total_pixels = img_array.shape[0] * img_array.shape[1]
+
+    # Check if more than 70% are similar
+    percentage = similar_pixels / total_pixels
+    
+    if percentage >= 0.7:
+        espacios_vacios_2.append(data["boxes"][idx])
+
+  return espacios_vacios_2
+
+def asignar_posiciones_en_cuadricula(rectangulos, tolerancia=600):
+    # Cada rectángulo es (x_max, y_min, x_min, y_max)
+
+    # Paso 1: Ordenar por y_max de mayor a menor (más arriba primero)
+    rectangulos_ordenados = sorted(rectangulos, key=lambda r: -r[3])  # r[3] = y_max
+
+    filas = []
+
+    for rect in rectangulos_ordenados:
+        agregado = False
+        for fila in filas:
+            # Comparar con la primera figura de la fila (por y_max)
+            if abs(fila[0][3] - rect[3]) <= tolerancia:
+                fila.append(rect)
+                agregado = True
+                break
+        if not agregado:
+            filas.append([rect])
+
+    # Paso 2: Ordenar cada fila por x_min (más a la izquierda primero)
+    for fila in filas:
+        fila.sort(key=lambda r: r[2])  # r[2] = x_min
+
+    # Paso 3: Asignar coordenadas (fila, columna)
+    posicion_por_rect = {}
+    for i, fila in enumerate(filas):
+        for j, rect in enumerate(fila):
+            posicion_por_rect[tuple(rect)] = (i + 1, j + 1)
+
+    return posicion_por_rect
+
+def rectangulos_intersectan(r1, r2, umbral=1000):
+    x1_1, y1_1, x1_2, y1_2 = r1
+    x2_1, y2_1, x2_2, y2_2 = r2
+    
+    x1_min = min(x1_1, x1_2)
+    x1_max = max(x1_2, x1_1)
+    y1_min = min(y1_1, y1_2)
+    y1_max = max(y1_2, y1_1)
+
+    x2_min = min(x2_1, x2_2)
+    x2_max = max(x2_2, x2_1)
+    y2_min = min(y2_1, y2_2)
+    y2_max = max(y2_2, y2_1)
+
+    # Consideramos el umbral para permitir una pequeña superposición o cercanía
+    if x1_min >= x2_max + umbral or x2_min >= x1_max + umbral:
+        return True
+    if y1_min >= y2_max + umbral or y2_min >= y1_max + umbral:
+        return True
+    
+    return False
+
+
+def encontrar_espacios_vacios_filas(rectangulos, posiciones, rectangulo_grande, tolerancia=50):
+    from collections import defaultdict
+
+    # Agrupar rectángulos por fila
+    filas = defaultdict(list)
+    for rect, (fila, _) in posiciones.items():
+        filas[fila].append(rect)
+
+    espacios_vacios = []
+
+    for fila_id in sorted(filas):
+        fila = filas[fila_id]
+
+        for i in range(len(fila) - 1):
+            rect_izq = fila[i]
+            rect_der = fila[i + 1]
+
+            # Definir límites del espacio entre rectángulos
+            espacio_x_max = max(rect_izq[0], rect_izq[2]) # x_max del rectángulo izquierdo
+            espacio_x_min = min(rect_der[0], rect_der[2])  # x_min del rectángulo derecho
+            ancho = espacio_x_min - espacio_x_max
+            y_min = max(rect_izq[1], rect_der[1])
+            y_max = min(rect_izq[3], rect_der[3])
+            if ancho >= 20:
+                nuevo_espacio = (rect_izq[2], y_max, rect_der[0], y_max)
+
+                # Verifica que no intersecte con ningún rectángulo existente
+                interseca = any(rectangulos_intersectan(nuevo_espacio, r) for r in rectangulos)
+
+                if not interseca:
+                  espacios_vacios.append(nuevo_espacio)
+
+
+
+    return espacios_vacios
+
+def toda_la_info(img_bytes):
+  data, rectangulo_grande = proceso_general(img_bytes, "models\\best.pt", confidence1 = 0.01, confidence2 = 0.1)
+  posicion_por_rect = asignar_posiciones_en_cuadricula(data["boxes"],rectangulo_grande[2]/6)
+  for i in list(posicion_por_rect):
+    if posicion_por_rect[i][0] > 4:
+        del posicion_por_rect[i]
+  dict_vacios = {}
+  espacios_vacios = encontrar_espacios_vacios_filas(data["boxes"], posicion_por_rect, rectangulo_grande, tolerancia=rectangulo_grande[2]/100)
+  espacios_vacios_2 = vacios_chequeo2(data)
+  espacios_vacios.extend(espacios_vacios_2)
+  x = 1
+  for i in espacios_vacios:
+    dict_vacios[i] = x
+    x += 1
+
+  return data, rectangulo_grande, posicion_por_rect, espacios_vacios, dict_vacios
+
 def visualizar(img_bytes):
     """
     Show original image and detection results side by side.
@@ -416,33 +548,32 @@ def visualizar(img_bytes):
         image_path: Path to the input image
         confidence_threshold: Minimum confidence score for detections
     """
-    # Leer la imagen
+    # Read original image
     nparr = np.frombuffer(img_bytes, np.uint8)
     original_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-    if original_image is None:
-        raise ValueError("No se pudo decodificar la imagen desde bytes.")
-
-    # Convertir a RGB
     original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
     annotated_image = original_image.copy()
 
-    data, rectangulo_grande = proceso_general(img_bytes, "models\\best.pt", confidence1 = 0.01, confidence2 = 0.1)
-    posicion_por_rect = asignar_posiciones_en_cuadricula(data["boxes"])
-    espacios_vacios = encontrar_espacios_vacios_filas(data["boxes"], posicion_por_rect, rectangulo_grande, tolerancia=10)
+    data, rectangulo_grande, posicion_por_rect,espacios_vacios, dict_vacios = toda_la_info(img_bytes)
 
 
     # Process each detected object and apply confidence threshold filtering
     class_labels = {}
     for box in data["boxes"]:
         # Draw bounding box
-        cv2.rectangle(annotated_image, (box[0], box[1]), (box[2], box[3]), (0,0,0), 2)
+        if box in espacios_vacios:
+          cv2.rectangle(annotated_image, (box[0], box[1]), (box[2], box[3]), (255, 0, 0), -1)
+        else:
+          cv2.rectangle(annotated_image, (box[0], box[1]), (box[2], box[3]), (0,0,0), 2)
         label = str(posicion_por_rect[box])  # starts from 1
         position = (box[0], box[1])  # slightly above the top-left corner
-        cv2.putText(annotated_image, label, position, cv2.FONT_HERSHEY_SIMPLEX, 5, (255, 255, 255), 3)
+        cv2.putText(annotated_image, label, position, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 3)
 
-    for box in espacios_vacios:
-      cv2.rectangle(annotated_image, (box[2], box[1]), (box[0], box[3]), (255, 255, 255), -1)
+    for caja in espacios_vacios:
+        cv2.rectangle(annotated_image, (caja[0], caja[1]), (caja[2], caja[3]), (255, 0, 0), -1)
+        label = str(dict_vacios[caja])  # starts from 1
+        position = (caja[0], caja[1])  # slightly above the top-left corner
+        cv2.putText(annotated_image, label, position, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 3)
 
     # Create figure
     plt.figure(figsize=(15, 7))

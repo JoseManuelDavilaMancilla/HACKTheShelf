@@ -36,7 +36,7 @@ if uploaded_file:
     # Save image to a temporary file
     image_path = f"temp_{uploaded_file.name}"
     with open(image_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        f.write(uploaded_file.getbuffer())
 
     # Option 1: Insert raw image bytes (if MongoDB stores binary)
     with open(image_path, "rb") as f:
@@ -51,7 +51,7 @@ if uploaded_file:
     #st.divider()
     #st.write(posicion_por_rect)
     #st.write(espacios_vacios)
-    #pcrop.visualizar(image_bytes)
+    pcrop.visualizar(image_bytes)
 
     #
     #st.write(analysis_results)
