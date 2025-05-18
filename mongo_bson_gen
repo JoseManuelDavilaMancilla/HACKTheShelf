@@ -1,0 +1,39 @@
+''' import os
+from pymongo import MongoClient
+
+# Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017/")  # update if using Atlas
+db = client["your_database_name"]
+collection = db["your_collection_name"]
+
+# Folder path
+folder_path = "assets/Estantes_jpg"
+
+# Loop over all JPEG files
+for filename in os.listdir(folder_path):
+    if filename.lower().endswith(".jpg") or filename.lower().endswith(".jpeg"):
+        file_path = os.path.join(folder_path, filename)
+        
+        with open(file_path, "rb") as f:
+            image_data = f.read()
+
+        doc = {
+            "filename": filename,
+            "image_data": image_data
+        }
+
+        collection.insert_one(doc)
+        print(f"Inserted {filename}")
+
+'''
+
+'''
+doc = {
+    "filename": filename,
+    "image_data": image_data,
+    "category": "estante",
+    "upload_date": datetime.utcnow()
+}
+
+
+'''
