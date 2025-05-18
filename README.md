@@ -44,14 +44,14 @@ Próximamente: video demo e imágenes de ejemplo.
 ```
  Usuario
    │
-Frontend Web (React)
+Frontend Web (Streamlit)
    │
-Backend API (Node.js + MongoDB)
+Backend API (Streamlit + MongoDB)
    │
-┌──────────────┬──────────────────────┬────────────────────┐
+┌──────────────┬──────────────────────┬──────────────────────┐
 │ Reconocimiento (YOLOv3) │ Clasificación │ Optimización     │
-│ detecta bbox            │ Clip + Cloud  │ Planograma ideal │
-└──────────────┴──────────────────────┴────────────────────┘
+│ Pipeline Mejora         │ Clip + Cloud  │ Planograma ideal │
+└──────────────┴──────────────────────┴──────────────────────┘
 ```
 
 ---
