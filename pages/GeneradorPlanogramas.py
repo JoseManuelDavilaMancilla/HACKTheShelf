@@ -123,16 +123,24 @@ if csv_file:
         if seleccion:
             anaquel_img, boxes = generar_anaquel(df, seleccion, img_folder)
 
+            from streamlit.runtime.media_file_storage import media_file_manager
+
+            # Convertir imagen PIL a formato compatible
+            buffer = BytesIO()
+            anaquel_img.save(buffer, format="PNG")
+            img_url = media_file_manager.create_url(buffer.getvalue())
+
             canvas_result = st_canvas(
                 fill_color="rgba(255, 165, 0, 0.3)",
                 stroke_width=0,
-                background_image=anaquel_img,
+                background_image=img_url,
                 update_streamlit=True,
                 height=anaquel_img.height,
                 width=anaquel_img.width,
                 drawing_mode="point",
                 key="canvas"
             )
+
 
             if canvas_result.json_data and canvas_result.json_data.get("objects"):
                 last_obj = canvas_result.json_data["objects"][-1]
