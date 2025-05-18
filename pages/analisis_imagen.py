@@ -1,7 +1,9 @@
 import streamlit as st
-from models.image_analyzer import analyze_image
-from PIL import Image
+import models.pipeline_crop as pcrop
+import api.mongo_connection as mc
+import models.image_analyzer as ima
 
+from PIL import Image
 import os
 
 st.set_page_config(
@@ -27,17 +29,31 @@ st.divider()
 uploaded_file = st.file_uploader("Subir Imagen", accept_multiple_files=False, type=["jpg"])
 
 if uploaded_file:
+    DATABASE = "files_hackathon"
+    COLLECTION = "anaquel_estante"
     st.success("Foto subida con éxito")
 
-    with open(f"temp_{uploaded_file.name}", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-        image_path = f"temp_{uploaded_file.name}"
-    image_name = os.path.splitext(image_path)[0]
+    # Save image to a temporary file
+    image_path = f"temp_{uploaded_file.name}"
+    with open(image_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+    # Option 1: Insert raw image bytes (if MongoDB stores binary)
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    # Insert into MongoDB
+    document_id = mc.insert_image_data(image_path, DATABASE, COLLECTION)
+    analisis_imagen = ima.analyze_image(document_id, DATABASE, COLLECTION)
+    # Show image and results
     st.image(image_path)
-    analysis_results = analyze_image(image_path)
-    st.write(analysis_results)
+    #boxes, rectangulo_grande, posicion_por_rect, espacios_vacios = pcrop.toda_la_info(image_bytes)   
+    #st.divider()
+    #st.write(posicion_por_rect)
+    #st.write(espacios_vacios)
+    #pcrop.visualizar(image_bytes)
 
-    #st.pyplot(fig2)
+    #
+    #st.write(analysis_results)
 
-    # Despliega 2 graficas del resultado del YOLO y un menu de seleccion para escojer los objetos con streamlit
 

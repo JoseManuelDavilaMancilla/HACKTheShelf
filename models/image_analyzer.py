@@ -1,9 +1,9 @@
 import json
 import requests
 import base64
-import streamlit as st
 from PIL import Image
 from io import BytesIO
+import streamlit as st
 import models.pipeline_crop as pcrop
 import api.mongo_connection as mc
 import logging
@@ -21,33 +21,58 @@ def encode_image(image):
         raise TypeError("Expected str or PIL.Image.Image")
     
 def cloudflare_llavahf(image_path : str) -> str:
-    imagen = Image.open(image_path)
-    inputs = [
-        {
-            "image": encode_image(image=imagen),
-            "max_tokens": 512,
-            "temperature": 0.7,
-            "prompt": "Analyze the content of the image.", #Prompt feo (optimizar)
-            "raw": False,
-            "seed": 42 
-        }
-    ]
+    ACCOUNT_ID =  st.secrets["CLOUDFLARE"]["ACCOUNT_ID"]
+API_TOKEN = st.secrets['CLOUDFLARE']['API_KEY']
 
-    # Getting the base64 string
-    account_id = st.secrets["CLOUDFLARE"]["ACCOUNT_ID"]
-    API_BASE_URL = f'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/'
-    headers = {
-        "Authorization": f"Bearer {st.secrets['CLOUDFLARE']['API_KEY']}"
+# Create empty JSON file
+with open("descripciones.json", "w") as f:
+    json.dump([], f)
+
+url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/run/@cf/llava-hf/llava-1.5-7b-hf"
+headers = {
+    "Authorization": f"Bearer {API_TOKEN}", 
+    "Content-Type": "application/json"
+}
+## Cargar la imagen como bytes
+img_dir = os.listdir("assets")
+for img in img_dir:
+    image_path = os.path.join("assets", img)
+        
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    # Convertir la imagen a una lista de enteros (valores entre 0-255)
+    image_array = list(image_bytes)
+
+    # Construir el payload completo como JSON
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a store shelf product recognition system. You will receive as input a single product image cropped from a shelf. Your response must only contain the name of the product or brand. If you are not sure about the product, please answer unknown.\n"
+                )
+            },
+            {
+                "role": "user",
+                "content": "Identify the image provided:"
+            }
+        ],
+        "image": image_array,
+        "raw": True,
+        "max_tokens": 256,
     }
 
-    def run(model, inputs):
-        response = requests.post(f"{API_BASE_URL}{model}", headers=headers, json=inputs)
-        return response.json()
-    
-    output = run("@cf/llava-hf/llava-1.5-7b-hf", inputs)
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()  # Raise an error for bad responses (4xx or 5xx)
 
-    logging.info(f"Output: {output}")
-    return output
+    result = response.json()
+    # Guardar la respuesta como línea separada en un archivo JSON
+    with open("descripciones.json", "a") as f:
+        json.dump(result, f)
+        f.write("\n")
+
+#_______________________________________
 
 def cloudflare_llama(description : str) -> str:
 
@@ -74,17 +99,9 @@ def cloudflare_llama(description : str) -> str:
     return output
 
 #--------------------------------------------------------------------------------
-
-def analyze_image(image_path : str) -> str:
-    DATABASE = "files_hackathon"
-    COLLECTION = "anaquel_estante"
-    # obtienes la imagen
-    #cropped_dict = pcrop.proceso_general(image_path, 0.2, "models\\best.pt")
-    #document = mc.insert_image_data(image_path, DATABASE, COLLECTION )
-    imagen = mc.get_image_data("6829a0b0526bcfb9cb109397", DATABASE, COLLECTION)
-    #cropped_dict = pcrop.proceso_general(imagen, 0.2, "models\\best.pt")
-    #boxed = pcrop.get_boxes(imagen, 0.1,"models\\best.pt" )
-    data, rectangulo_grande = pcrop.proceso_general(imagen, "models\\best.pt")
-    print(data[0])
+def analyze_image(document_id, DATABASE, COLLECTION):
+    image_bytes = mc.get_image_data(document_id, DATABASE, COLLECTION)
+    yolo_data = pcrop.toda_la_info(image_bytes)
+    yolo_mongo = mc.insert_yolo_data(document_id, yolo_data, DATABASE, COLLECTION)
+    return yolo_mongo
     
-analyze_image("assets\\IMG_2716.jpg")

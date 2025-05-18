@@ -5,7 +5,8 @@ from PIL import Image
 from io import BytesIO
 import os
 import streamlit as st
-
+import cv2
+import numpy as np
 client = MongoClient(st.secrets["MONGO"]["MONGO_URI"], tls=True, tlsAllowInvalidCertificates=True)
 
 def insert_image_data(filepath: str, database: str, collection: str) -> str:
@@ -68,7 +69,7 @@ def get_image_data(document_id: str, database: str, collection: str) -> bytes:
         print("Error retrieving image data:", e)
         return None
                  
-def insert_yolo_data(document_id: str, yolo_data: dict, database: str, collection: str) -> str:
+def insert_yolo_data(document_id: str, yolo_data: list, database: str, collection: str) -> str:
     """
     Inserts YOLO detection data (coordinates and optionally cropped images) into MongoDB.
 
@@ -82,112 +83,217 @@ def insert_yolo_data(document_id: str, yolo_data: dict, database: str, collectio
         str: Inserted document ID or error message.
     """
     try:
+        data = yolo_data[0]
+        posicion_por_rect = yolo_data[2]
+        espacios_vacios = yolo_data[4]
+
         db = client.get_database(database)
         col = db.get_collection(collection)
+        object_id = ObjectId(document_id)
 
-        coords = yolo_data['coordinates']
-        cropped_images = yolo_data['images']
+        yolo_output = []
+        for box, cropped_img in zip(data['boxes'], data['images']):
+            x1, y1, x2, y2 = map(int, box)
+            box_tuple = (x1, y1, x2, y2)
+            _, buffer = cv2.imencode('.jpg', cropped_img)
+            image_binary = Binary(buffer.tobytes())
+            position = posicion_por_rect.get(box_tuple, (None, None))
+            yolo_output.append({
+                "box_n": [x1, y1, x2, y2],
+                "image_n": image_binary,
+                "position": {(position[0], position[1])},
+                "empty": False
+            })
+       
+        for box_coords, box_id in espacios_vacios.items():
+            x1, y1, x2, y2 = map(int, box_coords)
+            yolo_output.append({
+                "box_n": [x1, y1, x2, y2],
+                "box_id": int(box_id),
+                "empty": True
+            })
 
-        # Convert each image to binary
-        image_binaries = []
-        for img in cropped_images:
-            from io import BytesIO
-            buffer = BytesIO()
-            img.save(buffer, format="JPEG")  # or PNG depending on your needs
-            image_binaries.append(Binary(buffer.getvalue()))
-
-        data = {
-            "image_id": document_id,
-            "detections": [
-                {"coords": coord, "cropped_image": img_bin}
-                for coord, img_bin in zip(coords, image_binaries)
-            ]
-        }
-
-        result = col.insert_one(data)
-        print(f"Inserted YOLO data with ID: {result.inserted_id}")
-        return str(result.inserted_id)
-
+        result = col.update_one(
+            {"_id": object_id},
+            {"$set": {"YOLO_output": yolo_output}}
+        )
+  
     except Exception as e:
         print("Error inserting YOLO data:", e)
         return str(e)
 
-def extract_cropped_images(document_id: str, database: str, collection: str):
-    """
-    Extracts cropped YOLO images from a specific MongoDB document.
 
-    Args:
-        document_id (str): The MongoDB document ID (as a string).
-        database (str): Name of the MongoDB database.
-        collection (str): Name of the collection containing YOLO detection data.
+def get_yolo_data(document_id: str, database: str, collection: str):
+    """
+    Retrieve YOLO_output from MongoDB and return each crop as JPG bytes.
 
     Returns:
-        List[Image.Image]: A list of PIL images (cropped detections), or empty list on error.
+        List[dict]: Each dict has:
+            - box_n (list[int])
+            - empty (bool)
+            - If empty is False:
+                - image_jpg (bytes)  ← your JPEG data here
+                - position (dict)
+            - If empty is True:
+                - box_id (int)
     """
     try:
         db = client.get_database(database)
         col = db.get_collection(collection)
+        obj_id = ObjectId(document_id)
 
-        doc = col.find_one({"_id": ObjectId(document_id)})
-
-        if not doc:
-            print(f"No document found with ID: {document_id}")
+        doc = col.find_one({"_id": obj_id}, {"YOLO_output": 1})
+        if not doc or "YOLO_output" not in doc:
             return []
 
-        cropped_images = []
-        for detection in doc.get("detections", []):
-            cropped_bin = detection.get("cropped_image")
-            if cropped_bin:
-                img = Image.open(BytesIO(cropped_bin))
-                cropped_images.append(img)
+        output = []
+        for item in doc["YOLO_output"]:
+            box = item["box_n"]
+            empty = item.get('empty')
+            if not empty:
+                # Decode to BGR OpenCV image
+                arr = np.frombuffer(item["image_n"], dtype=np.uint8)
+                cv_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
-        return cropped_images
+                # Re-encode as JPG
+                _, buf = cv2.imencode('.jpg', cv_img)
+                jpg_bytes = buf.tobytes()
+
+                output.append({
+                    "box_n": box,
+                    "image_jpg": jpg_bytes,
+                    "position": item.get("position"),
+                    "empty": empty
+                })
+            else:
+                output.append({
+                    "box_n": box,
+                    "box_id": item.get("box_id"),
+                    "empty": empty
+                })
+
+        return output
 
     except Exception as e:
-        print("Error extracting cropped images:", e)
-        return None
-      
-def insert_category(document_id: str, categories: list, database: str, collection: str) -> bool:
+        print("Error retrieving YOLO data:", e)
+        return []   
+
+        
+         
+
+def insert_category(document_id: str,
+                    categories_map: dict,
+                    database: str,
+                    collection: str) -> bool:
     """
-    Inserts predicted categories into the corresponding YOLO detection document.
+    Inserts predicted categories into the YOLO_output array of a MongoDB document.
 
     Args:
         document_id (str): MongoDB document ID as a string.
-        categories (list): List of predicted categories (str), one per detection.
+        categories_map (dict): Mapping from box coords to category, e.g.
+                               {
+                                   (x1, y1, x2, y2): "cat_a",
+                                   (x3, y3, x4, y4): "cat_b",
+                                   ...
+                               }
+        CATEGORIES_MAP IS SUPPOSED TO RECEIVE THE RETURN STATEMENT
+        FROM cloudflare_llavahf()...
+        
         database (str): MongoDB database name.
         collection (str): MongoDB collection name.
 
     Returns:
-        bool: True if update was successful, False otherwise.
+        bool: True if all updates succeeded (at least one element updated per box), False otherwise.
     """
     try:
         db = client.get_database(database)
         col = db.get_collection(collection)
+        obj_id = ObjectId(document_id)
 
-        # Fetch document to ensure it exists and to count detections
-        doc = col.find_one({"_id": ObjectId(document_id)})
-        if not doc:
-            print(f"No document found with ID: {document_id}")
-            return False
+        success = True
+        for box_coords, category in categories_map.items():
+            # ensure box_n matches the stored list
+            coords_list = list(box_coords)
 
-        detections = doc.get("detections", [])
-        if len(categories) != len(detections):
-            print("Mismatch between number of categories and detections.")
-            return False
+            res = col.update_one(
+                {
+                    "_id": obj_id,
+                    "YOLO_output.box_n": coords_list
+                },
+                {
+                    "$set": {
+                        "YOLO_output.$.category": category
+                    }
+                }
+            )
+            if res.modified_count == 0:
+                # no matching element found for these coords
+                print(f"⚠️  No match for box {coords_list}")
+                success = False
 
-        # Add 'category' to each detection
-        for i, category in enumerate(categories):
-            detections[i]["category"] = category
-
-        # Update the document
-        result = col.update_one(
-            {"_id": ObjectId(document_id)},
-            {"$set": {"detections": detections}}
-        )
-
-        print(f"Updated document {document_id} with categories.")
-        return result.modified_count > 0
+        return success
 
     except Exception as e:
         print("Error inserting categories:", e)
         return False
+
+    
+DATABASE = "files_hackathon"
+COLLECTION = "anaquel_estante"
+print(get_yolo_data("682a4a9fdd777bc1bbff97e6", DATABASE, COLLECTION))
+
+def get_all_data(document_id: str, database: str, collection: str):
+    """
+    Retrieve YOLO_output from MongoDB and return each crop as JPG bytes.
+
+    Returns:
+        List[dict]: Each dict has:
+            - box_n (list[int])
+            - empty (bool)
+            - If empty is False:
+                - image_jpg (bytes)  ← your JPEG data here
+                - position (dict)
+            - If empty is True:
+                - box_id (int)
+    """
+    try:
+        db = client.get_database(database)
+        col = db.get_collection(collection)
+        obj_id = ObjectId(document_id)
+
+        doc = col.find_one({"_id": obj_id}, {"YOLO_output": 1})
+        if not doc or "YOLO_output" not in doc:
+            return []
+
+        output = []
+        for item in doc["YOLO_output"]:
+            box = item["box_n"]
+            empty = item.get('empty')
+            if not empty:
+                # Decode to BGR OpenCV image
+                arr = np.frombuffer(item["image_n"], dtype=np.uint8)
+                cv_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+                # Re-encode as JPG
+                _, buf = cv2.imencode('.jpg', cv_img)
+                jpg_bytes = buf.tobytes()
+
+                output.append({
+                    "box_n": box,
+                    "image_jpg": jpg_bytes,
+                    "position": item.get("position"),
+                    "empty": empty
+
+                })
+            else:
+                output.append({
+                    "box_n": box,
+                    "box_id": item.get("box_id"),
+                    "empty": empty
+                })
+
+        return output
+
+    except Exception as e:
+        print("Error retrieving YOLO data:", e)
+        return []   

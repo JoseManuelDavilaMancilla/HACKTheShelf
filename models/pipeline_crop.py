@@ -1,8 +1,10 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import matplotlib.pyplot as plt
 from collections import defaultdict
 import torch
+import streamlit as st
 
 def crop_image(img_bytes, x1, y1, x2, y2):
   """
@@ -21,8 +23,9 @@ def crop_image(img_bytes, x1, y1, x2, y2):
   # Leer la imagen
   nparr = np.frombuffer(img_bytes, np.uint8)
   image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
   if image is None:
-        raise ValueError("No se pudo decodificar la imagen desde bytes.")
+    raise ValueError("No se pudo decodificar la imagen desde bytes.")
 
   # Convertir a RGB
   image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -31,7 +34,6 @@ def crop_image(img_bytes, x1, y1, x2, y2):
   cropped_image = image_rgb[y1:y2, x1:x2]
 
   return cropped_image
-
 
 def detect_objects(img_bytes, path_modelo):
     """
@@ -74,45 +76,55 @@ def detect_objects(img_bytes, path_modelo):
 
     return boxes, results.names, annotated_image, colors
 
-
-def get_boxes(img_bytes, confidence_threshold, path_modelo):
+def show_results(img_bytes, confidence_threshold,path_modelo):
     """
-    Gets confidence interval
+    Show original image and detection results side by side.
 
     Args:
-        img_bytes: Path to the image in bytes
+        image_path: Path to the input image
         confidence_threshold: Minimum confidence score for detections
     """
 
+    # Leer la imagen
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    original_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if original_image is None:
+        raise ValueError("No se pudo decodificar la imagen desde bytes.")
+
+    # Convertir a RGB
+    original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+
     # Get detection results
     boxes, class_names, annotated_image, colors = detect_objects(img_bytes,path_modelo)
-    
+
     # Process each detected object and apply confidence threshold filtering
     class_labels = {}
     for box in boxes:
         # Get box coordinates
         x1, y1, x2, y2 = map(int, box.xyxy[0])
-        
+
         # Get confidence score
         confidence = float(box.conf[0])
-        
+
         # Only show detections above confidence threshold
         if confidence > confidence_threshold:
             # Get class id and name
             class_id = int(box.cls[0])
             class_name = class_names[class_id]
-            
+
             # Get color for this class
             color = colors[class_id % len(colors)].tolist()
-            
+
             # Draw bounding box
             cv2.rectangle(annotated_image, (x1, y1), (x2, y2), color, 2)
-            
+
             # Store class name and color for legend
             class_labels[class_name] = color
 
     return boxes
 
+# prompt: dame las funciones de las cajas que se intersequen
 
 # prompt: dame las funciones de las cajas que se intersequen
 
@@ -146,6 +158,7 @@ def iou(boxA, boxB):
 
   return iou
 
+
 def get_intersecting_boxes_and_functions(boxes, iou_threshold=0.5):
     """
     Identifica los cuadros delimitadores que se intersecan y sus funciones asociadas.
@@ -163,6 +176,9 @@ def get_intersecting_boxes_and_functions(boxes, iou_threshold=0.5):
         que se intersecan (en este ejemplo, serían las funciones correspondientes
         a los índices 0, 1, 2 y 3 en la lista de cajas original).
     """
+    if(len(boxes) == 0):
+      return ([],[])
+
     intersecting_pairs = []
     intersecting_functions = []
 
@@ -209,7 +225,7 @@ def nodos_eliminados(intersecciones, valores):
       # Escoge el nodo con mayor valor
       mejor = max(nodos_disponibles, key=lambda n: valores_por_nodo[n])
       resultado.add(mejor)
-      
+
       # Elimina el nodo y sus vecinos del conjunto
       nodos_disponibles -= {mejor}
       nodos_disponibles -= grafo[mejor]
@@ -234,13 +250,15 @@ def limpieza_rectangulos(boxes, confidence_threshold):
   # Obtener las intersecciones y las funciones asociadas
   intersecciones, funciones = get_intersecting_boxes_and_functions(boxes,confidence_threshold)
   nodos_a_eliminar = nodos_eliminados(intersecciones, funciones)
-  
+
   mascara = torch.ones(len(boxes), dtype=torch.bool)
   mascara[nodos_a_eliminar] = False  # Eliminar esos nodos
-    
+
+  # Filtrar los datos internos del objeto boxes
   boxes.data = boxes.data[mascara]
 
   return boxes
+
 
 def proceso_general(img_bytes, path_modelo, confidence1 = 0.01, confidence2 = 0.1):
   """
@@ -254,9 +272,10 @@ def proceso_general(img_bytes, path_modelo, confidence1 = 0.01, confidence2 = 0.
   Returns:
       Una lista de imágenes recortadas resultantes de la limpieza.
   """
-  boxes = get_boxes(img_bytes, confidence1, path_modelo)
+  boxes = show_results(img_bytes, confidence1, path_modelo)
   boxes = limpieza_rectangulos(boxes, confidence2)
   images = []
+  coordenadas = []
 
   x_min_total = float('inf')
   y_min_total = float('inf')
@@ -266,15 +285,19 @@ def proceso_general(img_bytes, path_modelo, confidence1 = 0.01, confidence2 = 0.
   for box in boxes:
     x1, y1, x2, y2 = map(int, box.xyxy[0])
     croppeded_image = crop_image(img_bytes, x1, y1, x2, y2)
+    coordenadas.append((x1, y1, x2, y2))
     images.append(croppeded_image)
     x_min_total = min(x_min_total, x1,x2)
     y_min_total = min(y_min_total, y1,y2)
     x_max_total = max(x_max_total, x1,x2)
     y_max_total = max(y_max_total, y1,y2)
 
-  rectangulo_grande = [x_min_total,y_min_total,x_max_total,y_max_total]
 
-  return images, rectangulo_grande
+  rectangulo_grande = [x_min_total,y_min_total,x_max_total,y_max_total]
+  data = {'boxes': coordenadas, 'images': images}
+
+
+  return data, rectangulo_grande
 
 def asignar_posiciones_en_cuadricula(rectangulos, tolerancia=600):
     # Cada rectángulo es (x_max, y_min, x_min, y_max)
@@ -319,6 +342,8 @@ def rectangulos_intersectan(r1, r2):
     return True
 
 def encontrar_espacios_vacios_filas(rectangulos, posiciones, rectangulo_grande, tolerancia=50):
+    from collections import defaultdict
+
     # Agrupar rectángulos por fila
     filas = defaultdict(list)
     for rect, (fila, _) in posiciones.items():
@@ -348,12 +373,92 @@ def encontrar_espacios_vacios_filas(rectangulos, posiciones, rectangulo_grande, 
                 if not interseca:
                     espacios_vacios.append(nuevo_espacio)
 
+
+
     return espacios_vacios
 
-def toda_la_info(img_bytes):
-  data, rectangulo_grande = proceso_general(img_bytes, "models\\best.pt")
-  posicion_por_rect = asignar_posiciones_en_cuadricula(data["boxes"],rectangulo_grande[2]/6)
-  espacios_vacios = encontrar_espacios_vacios_filas(data["boxes"], posicion_por_rect, rectangulo_grande, tolerancia=50)
 
-  return data, rectangulo_grande, posicion_por_rect, espacios_vacios
+def toda_la_info(image_path):
+    """
+    Hace el pipeline completo de procesamiento de imagen.
 
+    Args:
+      image_path: Ruta a la imagen de entrada.
+      confidence_threshold: Umbral de confianza para 
+      la detección.
+      model: El modelo YOLOv8 cargado para la detección.
+
+    Returns:
+      Una lista de imágenes recortadas resultantes de la limpieza.
+      data es el box y la imagen croppeada del box en matriz rgb por pixel. coord es box e img es rgb
+      rect grande es todo el anaquel
+      posicion por rect es la coordenada del cuadrito. si m es 5 y n es 4, un ejemplo sería (1,2) de la matrix m x n
+    """
+    data, rectangulo_grande = proceso_general(image_path, "models\\best.pt", confidence1 = 0.01, confidence2 = 0.1)
+    posicion_por_rect = asignar_posiciones_en_cuadricula(data["boxes"],rectangulo_grande[2]/6)
+    for i in list(posicion_por_rect):
+        if posicion_por_rect[i][0] > 4:
+            del posicion_por_rect[i]
+
+    dict_vacios = {}
+    espacios_vacios = encontrar_espacios_vacios_filas(data["boxes"], posicion_por_rect, rectangulo_grande, tolerancia=50)
+    x = 1
+    for i in espacios_vacios:
+        dict_vacios[i] = x
+        x += 1
+
+    return [data, rectangulo_grande, posicion_por_rect, espacios_vacios, dict_vacios]
+def visualizar(img_bytes):
+    """
+    Show original image and detection results side by side.
+
+    Args:
+        image_path: Path to the input image
+        confidence_threshold: Minimum confidence score for detections
+    """
+    # Leer la imagen
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    original_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if original_image is None:
+        raise ValueError("No se pudo decodificar la imagen desde bytes.")
+
+    # Convertir a RGB
+    original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+    annotated_image = original_image.copy()
+
+    data, rectangulo_grande = proceso_general(img_bytes, "models\\best.pt", confidence1 = 0.01, confidence2 = 0.1)
+    posicion_por_rect = asignar_posiciones_en_cuadricula(data["boxes"])
+    espacios_vacios = encontrar_espacios_vacios_filas(data["boxes"], posicion_por_rect, rectangulo_grande, tolerancia=10)
+
+
+    # Process each detected object and apply confidence threshold filtering
+    class_labels = {}
+    for box in data["boxes"]:
+        # Draw bounding box
+        cv2.rectangle(annotated_image, (box[0], box[1]), (box[2], box[3]), (0,0,0), 2)
+        label = str(posicion_por_rect[box])  # starts from 1
+        position = (box[0], box[1])  # slightly above the top-left corner
+        cv2.putText(annotated_image, label, position, cv2.FONT_HERSHEY_SIMPLEX, 5, (255, 255, 255), 3)
+
+    for box in espacios_vacios:
+      cv2.rectangle(annotated_image, (box[2], box[1]), (box[0], box[3]), (255, 255, 255), -1)
+
+    # Create figure
+    plt.figure(figsize=(15, 7))
+
+    # Show original image
+    plt.subplot(1, 2, 1)
+    plt.title('Original Image')
+    plt.imshow(original_image)
+    plt.axis('off')
+
+    # Show detection results
+    plt.subplot(1, 2, 2)
+    plt.title('Detected Objects')
+    plt.imshow(annotated_image)
+    plt.axis('off')
+
+    plt.tight_layout()
+    st.pyplot(plt)
+    plt.show()
