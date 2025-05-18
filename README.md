@@ -1,4 +1,4 @@
-# 🧠📦 Smart Planogram Helper - Hackathon 2025
+# Smart Planogram Helper - Hackathon 2025
 
 Este proyecto fue desarrollado como solución para el reto del hackathon: **"¿Cómo podemos ayudar a los empleados de OXXO a organizar mejor sus anaqueles?"**.
 
@@ -6,7 +6,7 @@ Integra una solución web con modelos de IA para detectar productos en anaqueles
 
 ---
 
-## 📌 Índice
+## Índice
 
 - [Demo](#demo)
 - [Tecnologías](#tecnologías)
@@ -22,13 +22,13 @@ Integra una solución web con modelos de IA para detectar productos en anaqueles
 
 ---
 
-## 🎥 Demo
+## Demo
 
 Próximamente: video demo e imágenes de ejemplo.
 
 ---
 
-## ⚙️ Tecnologías
+## Tecnologías
 
 - **Frontend:** Streamlit
 - **Backend:** MongoDB Atlas
@@ -39,7 +39,7 @@ Próximamente: video demo e imágenes de ejemplo.
 
 ---
 
-## 🧱 Arquitectura del Proyecto
+## Arquitectura del Proyecto
 
 ```
  Usuario
@@ -56,7 +56,7 @@ Backend API (Node.js + MongoDB)
 
 ---
 
-## 🚀 Instalación
+## Instalación
 
 ```bash
 git clone 
@@ -81,7 +81,7 @@ npm run dev
 
 ---
 
-## 📦 Módulos
+## Módulos
 
 ### 1. Frontend Web
 
@@ -134,7 +134,7 @@ python detectar_productos.py --imagen ./imagenes/anaquel.jpg
 
 ---
 
-## 📄 Licencia
+## Licencia
 
 MIT © 2025 - Proyecto desarrollado para fines académicos y demostrativos.  
 No afiliado con FEMSA ni OXXO.
